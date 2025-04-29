@@ -1,0 +1,289 @@
+---
+title: "DSLab"
+author: "Antonio Mastroianni [898723], William Joseph Borrusso [902073], Luca Galli [905236], Simone Massardi []"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+library("readxl")
+library("skimr")
+library("dplyr")
+library("readr")
+library(mice)
+library(car)
+library(dplyr)
+library("epitools")
+library("epiR")
+library("OddsPlotty")
+library(ggplot2)
+```
+
+```{r, eval=FALSE}
+data <- read_excel("./belize_ophi.xlsx")
+summary(data)
+
+
+data <- data %>%
+  rename(
+    household_id = hh_id,
+    individual_id = ind_id,
+    child_mortality = d_cm,
+    nutrition = d_nutr,
+    school_attendance = d_satt,
+    years_of_schooling = d_educ,
+    electricity = d_elct,
+    drinking_water = d_wtr,
+    sanitation = d_sani,
+    housing = d_hsg,
+    cooking_fuel = d_ckfl,
+    assets = d_asst,
+    missing = miss,
+    weighted_sum = weighted_sum,
+    multidimensional_poverty = multi_poor
+  )
+
+# Check for missing values
+colSums(is.na(data))
+
+# Remove duplicates
+data <- data %>%
+  distinct()
+
+# Convert deprivation columns to factors
+deprivation_cols <- c("child_mortality", "nutrition", "school_attendance",
+                      "years_of_schooling", "electricity", "drinking_water",
+                      "sanitation", "housing", "cooking_fuel", "assets", "missing", "multidimensional_poverty")
+
+data[deprivation_cols] <- lapply(data[deprivation_cols], factor)
+
+```
+
+```{r, eval=FALSE}
+skim(data)
+```
+
+```{r, eval=FALSE}
+data
+```
+
+```{r, eval=FALSE}
+prv <- data %>% group_by(household_id) %>% mutate(names.equal = n_distinct(individual_id) == 1) %>% ungroup
+table(prv$names.equal)
+```
+
+```{r, eval=FALSE}
+find_different_rows <- function(data) {
+    data %>%
+        group_by(household_id) %>%
+        filter(n() > 1) %>%
+        mutate(is_different = rowSums(across(everything(), ~ . != first(.))) > 0) %>%
+        filter(is_different) %>%
+        select(-is_different)
+}
+
+different_rows <- find_different_rows(data)
+print(different_rows)
+
+```
+
+```{r, eval=FALSE}
+not_impute <- data[, c("household_id", "individual_id")]
+
+# Separa tutte le altre colonne in un altro dataframe
+#not_impute <- data[, !(names(data) %in% c("a", "f", "g"))]
+```
+
+```{r, eval=FALSE}
+not_impute
+```
+
+```{r, eval=FALSE}
+MISSING_DATA_IMPUTATION <- TRUE
+
+if(MISSING_DATA_IMPUTATION==TRUE){
+  imputed_data <- mice(data, m = 1, maxit 
+  = 50, method = 'rf', seed = 123)
+  data <- complete(imputed_data, 1)
+}
+```
+
+```{r, eval=FALSE}
+skim(data)
+```
+
+```{r}
+# Write to CSV file
+# write_csv(data, "./imputed_rd_50.csv")
+```
+
+```{r}
+dataf <- read_csv("imputedrfixed.csv")
+#housef <- read_csv("household_data.csv")
+```
+
+Let's fix data types
+
+```{r}
+to_factor_cols <- c("nutrition", "electricity", "housing", "missing", "school_attendance", "drinking_water", "cooking_fuel", "multidimensional_poverty_new", "child_mortality", "years_of_schooling", "sanitation", "assets", "multidimensional_poverty", "severity")
+dataf[, to_factor_cols] <- lapply(dataf[, to_factor_cols], function(x) factor(x))
+```
+
+```{r}
+dataf
+```
+
+Let's recalculate the weighted sum for each row:
+
+```{r}
+dataf$mpi_new <- (1/6)*as.numeric(dataf$nutrition) + (1/6)*as.numeric(dataf$child_mortality) + (1/6)*as.numeric(dataf$years_of_schooling) + (1/6)*as.numeric(dataf$school_attendance) + (1/18)*as.numeric(dataf$cooking_fuel) + (1/18)*as.numeric(dataf$sanitation) + (1/18)*as.numeric(dataf$drinking_water) + (1/18)*as.numeric(dataf$electricity) + (1/18)*as.numeric(dataf$housing) + (1/18)*as.numeric(dataf$assets) - 1
+```
+
+Let's recalculate the multidimensional_poverty score aswell.
+
+```{r}
+dataf$multidimensional_poverty_new = ifelse(dataf$mpi > 0.33, 1, 0)
+dataf
+```
+
+Let's create a new columns indicating severity
+
+```{r}
+dataf$severity <- cut(dataf$mpi, breaks = c(0, 0.20, 0.33, 0.50, 1), 
+                   labels = c("Not poor", "Vulnerable", "Poor", "severly Poor"), 
+                   include.lowest = TRUE)
+```
+
+Let's create an aggregated dataframe over households
+
+```{r warning=FALSE}
+hh_data <- dataf %>%
+  group_by(household_id) %>%
+  summarise(
+    n_members = n(),
+    across(everything(), first)
+  )
+hh_data
+```
+
+Let's turn the number of household members into a nominal variable.
+
+```{r}
+hh_data$n_members_cat <- cut(hh_data$n_members, breaks = c(0,2,4,6,19), include.lowest = TRUE, labels = c('1-2','3-4','5-6','7+'))
+table(hh_data$n_members_cat)
+```
+
+```{r}
+dataf <- dataf %>%
+  group_by(household_id) %>%
+  mutate(count = n()) %>%
+  ungroup()
+```
+
+```{r}
+dataf$n_members_cat <- cut(dataf$count, breaks = c(0,2,4,6,19), include.lowest = TRUE, labels = c('1-2','3-4','5-6','7+'))
+table(dataf$n_members_cat)
+```
+
+Non-categorical variables are removed to prepare the date for regression
+
+```{r}
+dataf <- subset(dataf, select = -c(household_id, individual_id, weighted_sum, mpi, missing, multidimensional_poverty, count))
+```
+
+```{r}
+hh_data <- subset(hh_data, select = -c(household_id, individual_id, weighted_sum, mpi, severity, missing, multidimensional_poverty))
+```
+
+```{r}
+hh_data
+```
+
+Let's check severity distribution
+
+```{r}
+table(dataf$severity)
+```
+
+```{r}
+colnames(dataf)[c(1,2,3,4,5,6,7,8,9,10)]
+```
+
+Let's check which variables have significant ORs w.r.t. nutrition.
+The printed values represent in order, the OR point estimate, the 95% lower bound, upper bound and p-value.
+
+```{r}
+
+for (b in colnames(dataf)[c(1,2,3,4,5,6,7,8,9,10)]){
+  cat("ODDS RATIO BETWEEN nutrition AND ", b, ":")
+  cat("\n")
+  cat(epitab(dataf[["nutrition"]], dataf[[b]],method = c( "oddsratio"))$tab[2,c(5, 6, 7, 8)])
+  cat("\n \n")
+}
+
+
+```
+
+All odds ratios are significant. Let's pick housing, which is a more localizable variable than nutrition, as our main covariate. We are looking for the exposure odds ratio and confidence intervals.
+
+```{r}
+tab_hh <- xtabs(n_members ~ nutrition + housing, data=hh_data)
+epi.2by2(dat=tab_hh, method="case.control")
+```
+
+Let's try to adjust for number of family members
+
+```{r}
+tab_hh <- xtabs(hh_data$n_members ~ hh_data$nutrition + hh_data$housing + hh_data$n_members_cat)
+epi.2by2(dat=tab_hh, method="case.control")
+```
+
+Stratas are homogeneous (Woolf test p-value of 1.222).
+
+Let's check the single ORs stratifying for the n_members_cat variable
+
+```{r}
+for (lev in levels(hh_data$n_members_cat)){
+  cat("\n \n")
+  cat("Odds ratio for n_members_cat=", lev)
+  cat("\n")
+  #print(epitab(nutrition, housing, data=dataf, method = "oddsratio"))
+  tab_hh <- xtabs(n_members ~ nutrition + housing, data=hh_data[hh_data$n_members_cat == lev,])
+  print(epi.2by2(dat=tab_hh, method="case.control"))
+  cat("\n")
+}
+```
+
+Let's build a logistic regression, which returns a log-odds estimate for housing adjusted for all the living condition confounding variables
+
+```{r}
+lr <- glm(nutrition ~ housing + electricity + cooking_fuel + sanitation + drinking_water + assets, family = "binomial", data = dataf)
+summary(lr)
+```
+
+```{r}
+exp(cbind("Odds ratio" = coef(lr), confint.default(lr, level = 0.95)))
+```
+
+```{r}
+# Pass in the trained model from CARET and expose the finalModel list element from CARET
+plotty <- odds_plot(lr, title = "Odds Ratios Plot of nutrition ~ housing",
+  subtitle = "Adjusted for all the living standards deprivations",
+  point_col = "#00f2ff",
+  h_line_color = "red")
+
+plot <- plotty$odds_plot #Returns the plot element from the list
+#plot <- plot + ggthemes::theme_economist()
+
+# Add odds ratios to labels by calling the data list element
+# The round function is used to return 2 decimal place values
+plot + geom_text(label=round(plotty$odds_plot$data$OR, digits=2), 
+                             hjust=0.1, vjust=1.5)
+
+```
