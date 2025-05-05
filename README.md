@@ -4,8 +4,9 @@ An analytical approach to tackling nutrition deprivation in Belize using housing
 ## Table of Contents
 - [About](#about)
 - [Technologies](#technologies)
-- [Documentation](#documentation)
 - [Usage](#usage)
+- [Documentation](#documentation)
+
 
 ## About
 
