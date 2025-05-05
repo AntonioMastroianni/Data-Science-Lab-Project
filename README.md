@@ -27,4 +27,4 @@ In order to reproduce the project, place "imputedrfixed.csv" file in the same fo
 
 ## Documentation
 
-You can find the full project report [here](docs/Data_Science_Lab - report.pdf).
+You can find the full project report [here](docs/Data_Science_Lab - report.pdf) .
